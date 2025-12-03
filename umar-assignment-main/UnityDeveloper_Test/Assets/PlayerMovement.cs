@@ -11,6 +11,7 @@ public class ThirdPersonMovement : MonoBehaviour
     [Header("Movement Stats")]
     public float moveSpeed = 6f;
     public float turnSmoothTime = 0.1f;
+    public float jumpHeight = 2f; // New: Jump height property
 
     // EXPOSED: This variable will be read and modified by GravityShifter.cs
     [HideInInspector] public Vector3 velocity;
@@ -23,53 +24,77 @@ public class ThirdPersonMovement : MonoBehaviour
     public float groundDistance = 0.4f;
     public LayerMask groundMask;
 
+    [Header("Game Over Settings")] // New: Game Over specific settings
+    public float maxAirTime = 7f;
+    private float airTimeCounter = 0f;
+    private bool isGameOver = false;
+
     [Header("References")]
     public Transform cam;
+    private GameManager gameManager;
 
     // Private variables
     private CharacterController controller;
-    private Animator animator;
+    [SerializeField] private Animator animator;
     private float turnSmoothVelocity;
     private bool isGrounded;
 
     void Start()
     {
         controller = GetComponent<CharacterController>();
-        animator = GetComponent<Animator>();
+        gameManager = FindObjectOfType<GameManager>();
         if (cam == null) cam = Camera.main.transform;
     }
 
     void Update()
     {
-        // 1. GROUND CHECK (Relative to the current 'Down' direction)
+      
+        if (isGameOver) return;
+
+       
         Vector3 downDirection = -transform.up;
 
-        // Checks a sphere below the groundCheck point for ground layer collision
+       
         isGrounded = Physics.CheckSphere(groundCheck.position, groundDistance, groundMask);
 
-        // Update Animator Bool
+       
         animator.SetBool("IsGrounded", isGrounded);
 
         // Reset gravity velocity when grounded and if we are moving against the current up vector
-        if (isGrounded && Vector3.Dot(velocity, downDirection) > -0.1f)
+        if (isGrounded)
         {
-            // Apply a small force down the new gravity vector to stick to the floor
-            velocity = downDirection * 2f;
+           
+            airTimeCounter = 0f;
+
+            if (Vector3.Dot(velocity, downDirection) > -0.1f)
+            {
+               
+                velocity = downDirection * 2f;
+            }
+        }
+        else
+        {
+            
+            airTimeCounter += Time.deltaTime;
+
+         
+            if (airTimeCounter >= maxAirTime)
+            {
+                HandleGameOver();
+                return; // Stop processing further logic this frame
+            }
         }
 
-        // 2. INPUT
         float horizontal = Input.GetAxisRaw("Horizontal");
         float vertical = Input.GetAxisRaw("Vertical");
         Vector3 inputDirection = new Vector3(horizontal, 0f, vertical).normalized;
 
-        // 3. MOVEMENT & ROTATION
+         //MOVEMENT & ROTATION
         if (inputDirection.magnitude >= 0.1f)
         {
             // Calculate movement plane (perpendicular to the player's UP direction)
-            Vector3 playerRight = Vector3.Cross(transform.up, cam.forward).normalized;
-            Vector3 playerForward = Vector3.Cross(playerRight, transform.up).normalized;
+            // The rest of the movement and rotation logic remains the same
 
-            // Project camera forward and right onto the player's movement plane
             Vector3 cameraForwardOnPlane = Vector3.ProjectOnPlane(cam.forward, transform.up).normalized;
             Vector3 cameraRightOnPlane = Vector3.ProjectOnPlane(cam.right, transform.up).normalized;
 
@@ -82,20 +107,42 @@ public class ThirdPersonMovement : MonoBehaviour
 
             // Smoothly rotate the character's Y-axis relative to the current UP vector
             float angle = Mathf.SmoothDampAngle(transform.eulerAngles.y, targetAngle, ref turnSmoothVelocity, turnSmoothTime);
+          
             transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(moveDir, transform.up), turnSmoothTime);
 
             // Move the character
             controller.Move(moveDir * moveSpeed * Time.deltaTime);
         }
 
-        // 4. ANIMATOR SPEED
+      
+        if (isGrounded && Input.GetButtonDown("Jump"))
+        {
+            
+            float jumpVelocityMagnitude = Mathf.Sqrt(jumpHeight * 2f * currentGravity.magnitude);
+            velocity = transform.up * jumpVelocityMagnitude;
+
+           
+        }
+
+        
         float inputMagnitude = inputDirection.magnitude;
         animator.SetFloat("Speed", inputMagnitude, 0.1f, Time.deltaTime);
 
-        // 5. GRAVITY
+        // 6. GRAVITY
         // Gravity is applied in the direction of the current gravity vector
         velocity += currentGravity * Time.deltaTime;
         controller.Move(velocity * Time.deltaTime);
+    }
+
+
+    private void HandleGameOver()
+    {
+        isGameOver = true;
+        Debug.Log("GAME OVER: Air Time Exceeded " + maxAirTime + " seconds!");
+        gameManager.GameOver();
+
+       
+        controller.enabled = false;
     }
 
     // Helper to visualize the Ground Check sphere in the Editor
